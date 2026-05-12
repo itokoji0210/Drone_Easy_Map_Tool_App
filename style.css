@@ -304,7 +304,7 @@ textarea:focus {
   bottom: 0;
   z-index: 1000;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 8px;
   padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--line);
@@ -495,7 +495,7 @@ textarea:focus {
 body.print-preparing {
   width: 210mm;
   min-height: 297mm;
-  padding: 0;
+  padding: 10mm;
   background: #ffffff;
 }
 
@@ -523,8 +523,8 @@ body.print-preparing .print-title {
 }
 
 body.print-preparing #map {
-  height: 190mm;
-  min-height: 190mm;
+  height: 175mm;
+  min-height: 175mm;
   border: 1px solid #888888;
 }
 
@@ -549,8 +549,8 @@ body.print-preparing .map-legend {
 
 body.print-preparing .print-info {
   display: block;
-  margin-top: 4mm;
-  padding-top: 3mm;
+  margin-top: 5mm;
+  padding-top: 4mm;
   border-top: 1px solid #c7c7c7;
 }
 

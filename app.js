@@ -119,7 +119,8 @@ const elements = {
   locate: document.getElementById("locate-btn"),
   takeoff: document.getElementById("takeoff-btn"),
   draw: document.getElementById("draw-btn"),
-  print: document.getElementById("print-btn"),
+  jpeg: document.getElementById("jpeg-btn"),
+  pdf: document.getElementById("pdf-btn"),
   clear: document.getElementById("clear-btn"),
   didLayer: document.getElementById("did-layer-toggle"),
   airportLayer: document.getElementById("airport-layer-toggle"),
@@ -167,7 +168,7 @@ function sanitizeFilenamePart(value) {
   return value.trim().replace(/[\\/:*?"<>|]/g, "");
 }
 
-function buildPdfTitle() {
+function buildOutputTitle() {
   const shootingDate = elements.inputs[1].value;
   const coverageName = sanitizeFilenamePart(elements.inputs[0].value || "ドローン飛行範囲図");
   const pilot = sanitizeFilenamePart(elements.inputs[3].value || "操縦者未入力");
@@ -185,7 +186,7 @@ function refreshPrintInfo() {
 
 function setPdfDocumentTitle() {
   previousDocumentTitle = document.title;
-  document.title = buildPdfTitle();
+  document.title = buildOutputTitle();
 }
 
 function restoreDocumentTitle() {
@@ -385,30 +386,85 @@ async function restoreScreenLayout() {
   await loadAirportRestrictions();
 }
 
+function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
+async function renderExportCanvas() {
+  await preparePrintLayout();
+
+  const target = document.body;
+  return window.html2canvas(target, {
+    backgroundColor: "#ffffff",
+    scale: Math.min(window.devicePixelRatio || 1, 2),
+    useCORS: true,
+    allowTaint: false,
+    logging: false,
+    windowWidth: target.scrollWidth,
+    windowHeight: target.scrollHeight
+  });
+}
+
+function setExportButtonsDisabled(disabled, activeButton, label) {
+  elements.jpeg.disabled = disabled;
+  elements.pdf.disabled = disabled;
+  if (activeButton) {
+    activeButton.textContent = disabled ? "作成中" : label;
+  }
+}
+
+async function downloadJpeg() {
+  if (!window.html2canvas) {
+    showStatus("画像生成ライブラリを読み込めませんでした。通信状態を確認して再度お試しください。");
+    return;
+  }
+
+  setExportButtonsDisabled(true, elements.jpeg, "JPEG保存");
+  showStatus("JPEGを作成しています。地図タイルの読み込みを待っています。");
+
+  try {
+    const canvas = await renderExportCanvas();
+
+    await new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          reject(new Error("JPEG blob was not created."));
+          return;
+        }
+
+        saveBlob(blob, `${buildOutputTitle()}.jpg`);
+        resolve();
+      }, "image/jpeg", 0.95);
+    });
+    showStatus("JPEGをダウンロードしました。フォトアプリのダウンロード画像から確認できます。");
+  } catch (error) {
+    console.error(error);
+    showStatus("JPEGの作成に失敗しました。地図を少し動かしてから再度お試しください。");
+  } finally {
+    await restoreScreenLayout();
+    setExportButtonsDisabled(false, elements.jpeg, "JPEG保存");
+  }
+}
+
 async function downloadPdf() {
   if (!window.html2canvas || !window.jspdf?.jsPDF) {
     showStatus("PDF生成ライブラリを読み込めませんでした。通信状態を確認して再度お試しください。");
     return;
   }
 
-  elements.print.disabled = true;
-  elements.print.textContent = "作成中";
+  setExportButtonsDisabled(true, elements.pdf, "PDF保存");
   showStatus("PDFを作成しています。地図タイルの読み込みを待っています。");
 
   try {
-    await preparePrintLayout();
-
-    const target = document.querySelector(".map-section");
-    const canvas = await window.html2canvas(target, {
-      backgroundColor: "#ffffff",
-      scale: Math.min(window.devicePixelRatio || 1, 2),
-      useCORS: true,
-      allowTaint: false,
-      logging: false,
-      windowWidth: target.scrollWidth,
-      windowHeight: target.scrollHeight
-    });
-
+    const canvas = await renderExportCanvas();
     const pdf = new window.jspdf.jsPDF({
       orientation: "portrait",
       unit: "mm",
@@ -417,36 +473,32 @@ async function downloadPdf() {
     });
     const pageWidth = 210;
     const pageHeight = 297;
-    const margin = 10;
-    const maxWidth = pageWidth - margin * 2;
-    const maxHeight = pageHeight - margin * 2;
-    const imageWidth = maxWidth;
+    const imageWidth = pageWidth;
     const imageHeight = (canvas.height * imageWidth) / canvas.width;
-    const fittedHeight = Math.min(imageHeight, maxHeight);
-    const fittedWidth = imageHeight > maxHeight
+    const fittedHeight = Math.min(imageHeight, pageHeight);
+    const fittedWidth = imageHeight > pageHeight
       ? (canvas.width * fittedHeight) / canvas.height
       : imageWidth;
-    const x = margin + (maxWidth - fittedWidth) / 2;
+    const x = (pageWidth - fittedWidth) / 2;
 
     pdf.addImage(
       canvas.toDataURL("image/jpeg", 0.95),
       "JPEG",
       x,
-      margin,
+      0,
       fittedWidth,
       fittedHeight,
       undefined,
       "FAST"
     );
-    pdf.save(`${buildPdfTitle()}.pdf`);
+    pdf.save(`${buildOutputTitle()}.pdf`);
     showStatus("PDFをダウンロードしました。");
   } catch (error) {
     console.error(error);
     showStatus("PDFの作成に失敗しました。地図を少し動かしてから再度お試しください。");
   } finally {
     await restoreScreenLayout();
-    elements.print.disabled = false;
-    elements.print.textContent = "PDF保存";
+    setExportButtonsDisabled(false, elements.pdf, "PDF保存");
   }
 }
 
@@ -502,7 +554,11 @@ elements.draw.addEventListener("click", () => {
   showStatus("地図上を順番にタップして飛行範囲を囲んでください。最後は開始点をタップします。");
 });
 
-elements.print.addEventListener("click", async () => {
+elements.jpeg.addEventListener("click", async () => {
+  await downloadJpeg();
+});
+
+elements.pdf.addEventListener("click", async () => {
   await downloadPdf();
 });
 
