@@ -15,12 +15,14 @@ map.getPane("restrictionPane").style.zIndex = 350;
 const tileLayer = L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png", {
   maxZoom: 18,
   minZoom: 5,
+  crossOrigin: "anonymous",
   attribution: SOURCE_TEXT
 }).addTo(map);
 
 const didLayer = L.tileLayer("https://maps.gsi.go.jp/xyz/did2020/{z}/{x}/{y}.png", {
   maxZoom: 18,
   minZoom: 8,
+  crossOrigin: "anonymous",
   opacity: 0.58,
   attribution: DID_SOURCE_TEXT
 }).addTo(map);
@@ -383,6 +385,71 @@ async function restoreScreenLayout() {
   await loadAirportRestrictions();
 }
 
+async function downloadPdf() {
+  if (!window.html2canvas || !window.jspdf?.jsPDF) {
+    showStatus("PDF生成ライブラリを読み込めませんでした。通信状態を確認して再度お試しください。");
+    return;
+  }
+
+  elements.print.disabled = true;
+  elements.print.textContent = "作成中";
+  showStatus("PDFを作成しています。地図タイルの読み込みを待っています。");
+
+  try {
+    await preparePrintLayout();
+
+    const target = document.querySelector(".map-section");
+    const canvas = await window.html2canvas(target, {
+      backgroundColor: "#ffffff",
+      scale: Math.min(window.devicePixelRatio || 1, 2),
+      useCORS: true,
+      allowTaint: false,
+      logging: false,
+      windowWidth: target.scrollWidth,
+      windowHeight: target.scrollHeight
+    });
+
+    const pdf = new window.jspdf.jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: "a4",
+      compress: true
+    });
+    const pageWidth = 210;
+    const pageHeight = 297;
+    const margin = 10;
+    const maxWidth = pageWidth - margin * 2;
+    const maxHeight = pageHeight - margin * 2;
+    const imageWidth = maxWidth;
+    const imageHeight = (canvas.height * imageWidth) / canvas.width;
+    const fittedHeight = Math.min(imageHeight, maxHeight);
+    const fittedWidth = imageHeight > maxHeight
+      ? (canvas.width * fittedHeight) / canvas.height
+      : imageWidth;
+    const x = margin + (maxWidth - fittedWidth) / 2;
+
+    pdf.addImage(
+      canvas.toDataURL("image/jpeg", 0.95),
+      "JPEG",
+      x,
+      margin,
+      fittedWidth,
+      fittedHeight,
+      undefined,
+      "FAST"
+    );
+    pdf.save(`${buildPdfTitle()}.pdf`);
+    showStatus("PDFをダウンロードしました。");
+  } catch (error) {
+    console.error(error);
+    showStatus("PDFの作成に失敗しました。地図を少し動かしてから再度お試しください。");
+  } finally {
+    await restoreScreenLayout();
+    elements.print.disabled = false;
+    elements.print.textContent = "PDF保存";
+  }
+}
+
 function setTakeoffMode(enabled) {
   takeoffMode = enabled;
   elements.takeoff.classList.toggle("active", enabled);
@@ -436,8 +503,7 @@ elements.draw.addEventListener("click", () => {
 });
 
 elements.print.addEventListener("click", async () => {
-  await preparePrintLayout();
-  window.print();
+  await downloadPdf();
 });
 
 elements.clear.addEventListener("click", () => {
