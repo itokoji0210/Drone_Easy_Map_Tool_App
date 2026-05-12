@@ -165,6 +165,14 @@ textarea {
   background: rgba(76, 175, 80, 0.54);
 }
 
+.legend-swatch.drone-yellow {
+  background: rgba(255, 204, 0, 0.42);
+}
+
+.legend-swatch.drone-red {
+  background: rgba(218, 45, 45, 0.56);
+}
+
 .legend-swatch.takeoff {
   position: relative;
   width: 14px;

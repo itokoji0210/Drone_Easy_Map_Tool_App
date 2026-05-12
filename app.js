@@ -2,6 +2,7 @@ const TOKYO_STATION = [35.681236, 139.767125];
 const SOURCE_TEXT = "出典：国土地理院地図を加工して作成";
 const DID_SOURCE_TEXT = "人口集中地区（令和2年 総務省統計局）";
 const AIRPORT_SOURCE_TEXT = "空港等の周辺空域（航空局）";
+const DRONE_LAW_SOURCE_TEXT = "小型無人機等飛行禁止法対象施設周辺地域（警察庁・関係府省庁等）";
 const DEFAULT_TITLE = document.title;
 
 const map = L.map("map", {
@@ -38,8 +39,34 @@ const airportLayer = L.geoJSON(null, {
   }
 }).addTo(map);
 
+const droneYellowLayer = L.geoJSON(null, {
+  pane: "restrictionPane",
+  style: {
+    color: "#a66b00",
+    weight: 2,
+    opacity: 0.92,
+    fillColor: "#ffcc00",
+    fillOpacity: 0.24
+  }
+});
+
+const droneRedLayer = L.geoJSON(null, {
+  pane: "restrictionPane",
+  style: {
+    color: "#b42318",
+    weight: 2,
+    opacity: 0.95,
+    fillColor: "#da2d2d",
+    fillOpacity: 0.34
+  }
+});
+
+const droneLawLayer = L.layerGroup([droneYellowLayer, droneRedLayer]).addTo(map);
+
 const airportTileCache = new Map();
+const droneLawTileCache = new Map();
 let airportRequestId = 0;
+let droneLawRequestId = 0;
 
 const drawnItems = new L.FeatureGroup();
 map.addLayer(drawnItems);
@@ -127,6 +154,7 @@ const elements = {
   clear: document.getElementById("clear-btn"),
   didLayer: document.getElementById("did-layer-toggle"),
   airportLayer: document.getElementById("airport-layer-toggle"),
+  droneLawLayer: document.getElementById("drone-law-layer-toggle"),
   labels: document.getElementById("label-toggle"),
   status: document.getElementById("status-message"),
   createdAt: document.getElementById("created-at"),
@@ -288,6 +316,75 @@ async function loadAirportRestrictions() {
   features.filter(Boolean).forEach((geojson) => airportLayer.addData(geojson));
 }
 
+async function loadDroneLawRestrictions() {
+  droneLawRequestId += 1;
+  const requestId = droneLawRequestId;
+
+  if (!map.hasLayer(droneLawLayer) || map.getZoom() < 8) {
+    droneYellowLayer.clearLayers();
+    droneRedLayer.clearLayers();
+    return;
+  }
+
+  const zoom = 8;
+  const bounds = map.getBounds();
+  const northWest = bounds.getNorthWest();
+  const southEast = bounds.getSouthEast();
+  const minX = lngToTileX(northWest.lng, zoom);
+  const maxX = lngToTileX(southEast.lng, zoom);
+  const minY = latToTileY(northWest.lat, zoom);
+  const maxY = latToTileY(southEast.lat, zoom);
+  const requests = [];
+
+  droneYellowLayer.clearLayers();
+  droneRedLayer.clearLayers();
+
+  for (let x = minX; x <= maxX; x += 1) {
+    for (let y = minY; y <= maxY; y += 1) {
+      [
+        ["yellow", "https://maps.gsi.go.jp/xyz/drone_yz/{z}/{x}/{y}.geojson"],
+        ["red", "https://maps.gsi.go.jp/xyz/drone_rz/{z}/{x}/{y}.geojson"]
+      ].forEach(([type, template]) => {
+        const key = `${type}/${zoom}/${x}/${y}`;
+        if (!droneLawTileCache.has(key)) {
+          const url = template
+            .replace("{z}", zoom)
+            .replace("{x}", x)
+            .replace("{y}", y);
+          droneLawTileCache.set(
+            key,
+            fetch(url)
+              .then((response) => (response.ok ? response.json() : null))
+              .catch(() => null)
+          );
+        }
+
+        requests.push(
+          droneLawTileCache.get(key).then((geojson) => ({ type, geojson }))
+        );
+      });
+    }
+  }
+
+  const features = await Promise.all(requests);
+  if (requestId !== droneLawRequestId || !map.hasLayer(droneLawLayer)) {
+    return;
+  }
+
+  droneYellowLayer.clearLayers();
+  droneRedLayer.clearLayers();
+  features.forEach(({ type, geojson }) => {
+    if (!geojson) return;
+    if (type === "red") {
+      droneRedLayer.addData(geojson);
+      return;
+    }
+    droneYellowLayer.addData(geojson);
+  });
+  droneYellowLayer.bringToFront();
+  droneRedLayer.bringToFront();
+}
+
 function formatDateTime(date) {
   return new Intl.DateTimeFormat("ja-JP", {
     year: "numeric",
@@ -372,6 +469,7 @@ async function preparePrintLayout() {
     await redrawMapForCurrentLayout();
   }
   await loadAirportRestrictions();
+  await loadDroneLawRestrictions();
   await waitForVisibleTiles();
   await redrawMapForCurrentLayout();
   await waitForVisibleTiles();
@@ -387,6 +485,7 @@ async function restoreScreenLayout() {
   }
   await redrawMapForCurrentLayout();
   await loadAirportRestrictions();
+  await loadDroneLawRestrictions();
 }
 
 function saveBlob(blob, filename) {
@@ -698,11 +797,19 @@ elements.airportLayer.addEventListener("change", () => {
   loadAirportRestrictions();
 });
 
+elements.droneLawLayer.addEventListener("change", () => {
+  setTileOverlay(droneLawLayer, elements.droneLawLayer.checked);
+  loadDroneLawRestrictions();
+});
+
 elements.labels.addEventListener("change", () => {
   setLabelsVisible(elements.labels.checked);
 });
 
-map.on("moveend zoomend", loadAirportRestrictions);
+map.on("moveend zoomend", () => {
+  loadAirportRestrictions();
+  loadDroneLawRestrictions();
+});
 
 let lastHandledTouchAt = 0;
 
@@ -761,3 +868,4 @@ window.addEventListener("afterprint", () => {
 refreshCreatedAt();
 setLabelsVisible(labelsVisible);
 loadAirportRestrictions();
+loadDroneLawRestrictions();
